@@ -3,6 +3,7 @@
 import React from "react";
 import { useState } from "react";
 import { buildBag, type Tile } from "@/lib/tiles";
+import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 
 
 type Mult = "TW" | "DW" | "TL" | "DL" | null;
@@ -122,33 +123,45 @@ export default function Page() {
           v0: board layout + multipliers only
         </p>
 
-        <div className="mt-6 overflow-auto rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <div
-            className="grid gap-[2px]"
-            style={{
-              gridTemplateColumns: `repeat(15, 40px)`,
-              gridTemplateRows: `repeat(15, 40px)`,
-            }}
-          >
-            {multipliers.map((row, r) =>
-              row.map((cell, c) => {
-                const isCenter = r === 7 && c === 7;
-                return (
-                  <div
-                    key={`${r}-${c}`}
-                    className={[
-                      "flex items-center justify-center rounded-md border border-neutral-200 text-xs font-semibold text-neutral-700",
-                      bgClass(cell),
-                    ].join(" ")}
-                    title={`(${r + 1}, ${c + 1}) ${cell ?? "—"}`}
-                  >
-                    {isCenter ? "★" : labelFor(cell)}
-                  </div>
-                );
-              })
-            )}
-          </div>
+<div className="rounded-xl border border-neutral-200 bg-white p-3 shadow-sm">
+  <TransformWrapper
+    initialScale={0.7}
+    minScale={0.4}
+    maxScale={2.2}
+    centerOnInit
+    doubleClick={{ disabled: true }}
+    wheel={{ step: 0.08 }}
+    panning={{ velocityDisabled: true }}
+  >
+    {({ zoomIn, zoomOut, resetTransform }) => (
+      <>
+        <div className="mb-2 flex gap-2">
+          <button onClick={() => zoomOut()} className="rounded-md border px-2 py-1 text-sm">−</button>
+          <button onClick={() => zoomIn()} className="rounded-md border px-2 py-1 text-sm">+</button>
+          <button onClick={() => resetTransform()} className="rounded-md border px-2 py-1 text-sm">Reset</button>
         </div>
+
+        <div className="overflow-hidden rounded-lg border border-neutral-200">
+          <TransformComponent
+            wrapperStyle={{ width: "100%", height: "70vh" }}
+            contentStyle={{ width: "fit-content", height: "fit-content" }}
+          >
+            {/* your existing 15x15 grid goes here unchanged */}
+            <div
+              className="grid gap-[2px]"
+              style={{
+                gridTemplateColumns: `repeat(15, 40px)`,
+                gridTemplateRows: `repeat(15, 40px)`,
+              }}
+            >
+              {/* ...cells... */}
+            </div>
+          </TransformComponent>
+        </div>
+      </>
+    )}
+  </TransformWrapper>
+</div>
 
         <div className="mt-6">
         <div className="text-sm text-neutral-600">Turn</div>

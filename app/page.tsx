@@ -134,17 +134,16 @@ export default function Page() {
   const hasRack = rack.length > 0;
 
   return (
-    <main className="min-h-screen bg-neutral-50 p-6">
-      <div className="mx-auto max-w-4xl">
+<main className="min-h-screen bg-neutral-50 p-4 flex items-center justify-center text-slate-800">
+      <div className="w-full max-w-md flex flex-col gap-3 -translate-y-10">
+
         {/* Header */}
-        <h1 className="text-2xl font-semibold">Girlfriend Mode</h1>
+        <h1 className="text-2xl">Girlfriend Mode</h1>
 
         {/* Board + zoom/pan */}
         <div className="rounded-xl border border-neutral-200 bg-white p-3 shadow-sm">
-  {/* Square board viewport */}
-  <div className="aspect-square w-full">
           <TransformWrapper
-            initialScale={0.87}
+            initialScale={1}
             minScale={0.4}
             maxScale={2.2}
             centerOnInit
@@ -161,64 +160,57 @@ export default function Page() {
                   <button onClick={() => resetTransform()} className="rounded-md border px-2 py-1 text-sm">Reset</button>
                 </div>
 
-                {/* Zoom viewport */}
-                <div className="overflow-hidden rounded-lg border border-neutral-200">
-  <TransformComponent
-    wrapperStyle={{ width: "100%", height: "100%" }}
-    contentStyle={{
-      width: "100%",
-      height: "100%",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-    }}
-  >
-    {/* Board grid */}
-    <div
-      className="grid gap-[2px]"
-      style={{
-        // Responsive tiles: fits on iPhone, still looks good on desktop
-        gridTemplateColumns: `repeat(15, clamp(18px, 5.5vw, 34px))`,
-        gridTemplateRows: `repeat(15, clamp(18px, 5.5vw, 34px))`,
-      }}
-    >
-      {multipliers.map((row, r) =>
-        row.map((cell, c) => {
-          const isCenter = r === 7 && c === 7;
-          return (
-            <div
-              key={`${r}-${c}`}
-              className={[
-                "flex items-center justify-center rounded-md border border-neutral-200 text-[10px] font-semibold text-neutral-700",
-                bgClass(cell),
-              ].join(" ")}
-              title={`(${r + 1}, ${c + 1}) ${cell ?? "—"}`}
-            >
-              {isCenter ? "★" : labelFor(cell)}
-            </div>
-          );
-        })
-      )}
-    </div>
-  </TransformComponent>
-</div>
+                {/* Square board viewport */}
+                <div className="aspect-square w-full overflow-hidden rounded-lg border border-neutral-200">
+                  <TransformComponent
+                    wrapperStyle={{ width: "100%", height: "100%" }}
+                    contentStyle={{
+                      width: "100%",
+                      height: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    {/* Board grid */}
+                    <div
+                      className="grid gap-[2px] w-full h-full p-2"
+                      style={{
+                        gridTemplateColumns: "repeat(15, 1fr)",
+                        gridTemplateRows: "repeat(15, 1fr)",
+                      }}
+                    >
+                      {multipliers.map((row, r) =>
+                        row.map((cell, c) => {
+                          const isCenter = r === 7 && c === 7;
+                          return (
+                            <div
+                              key={`${r}-${c}`}
+                              className={[
+                                "aspect-square flex items-center justify-center rounded-md border border-neutral-200",
+                                // font scales with cell size
+                                "text-[clamp(8px,1.8vw,10px)]",
+                                bgClass(cell),
+                              ].join(" ")}
+                              title={`(${r + 1}, ${c + 1}) ${cell ?? "—"}`}
+                            >
+                              {isCenter ? "★" : labelFor(cell)}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </TransformComponent>
+                </div>
               </>
             )}
           </TransformWrapper>
         </div>
-        </div>
 
-        {/* Turn + rack */}
-        <div className="mt-6">
-          <div className="text-sm text-neutral-600">Turn</div>
-          <div className="text-lg font-semibold">{activePlayer}</div>
-
-          <div className="mt-2 text-xs text-neutral-500">
-            Tiles in bag: {bag.length}
-          </div>
-
+        {/* Rack */}
+        <div className="">
           {hasRack && (
-            <div className="mt-4 flex gap-2">
+            <div className="mt-1 flex gap-2 overflow-x-auto pb-1 justify-center">
               {rack.map((t) => (
                 <div
                   key={t.id}
@@ -227,15 +219,24 @@ export default function Page() {
                   <div className="flex h-full items-center justify-center text-lg font-bold">
                     {t.letter}
                   </div>
-                  <div className="absolute bottom-1 right-1 text-[10px] font-semibold">
+                  <div className="absolute bottom-1 right-1 text-[10px]">
                     {t.value}
                   </div>
                 </div>
               ))}
             </div>
           )}
+          {/* Turn + Player + Bag */}
+          <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-sm">
+            <div>
+              Turn: {activePlayer}
+            </div>
+            <div>
+              Tiles in bag: {bag.length}
+            </div>
+          </div>
         </div>
       </div>
-    </main>
+    </main >
   );
 }

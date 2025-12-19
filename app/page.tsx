@@ -1,23 +1,23 @@
 // app/page.tsx
 "use client";
-import React from "react";
-import { useState } from "react";
+
+import React, { useEffect, useMemo, useState } from "react";
 import { buildBag, type Tile } from "@/lib/tiles";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 
-
 type Mult = "TW" | "DW" | "TL" | "DL" | null;
+
+/* =========================================================
+   Board layout helpers (multiplier map)
+   - Pure functions: no React, no state
+   ========================================================= */
 
 function makeEmptyBoard(): Mult[][] {
   const size = 15;
   return Array.from({ length: size }, () => Array.from({ length: size }, () => null));
 }
 
-/**
- * Classic Scrabble multiplier layout (15x15).
- * Coordinates are [row, col], 0-indexed.
- * This encodes one quadrant and mirrors it for symmetry.
- */
+/*** Classic Scrabble multiplier layout (15x15). This encodes one quadrant and mirrors it for symmetry. */
 function buildScrabbleMultipliers(): Mult[][] {
   const b = makeEmptyBoard();
 
@@ -87,6 +87,10 @@ function buildScrabbleMultipliers(): Mult[][] {
   return b;
 }
 
+/* =========================================================
+   UI helpers (how squares look)
+   ========================================================= */
+
 function labelFor(mult: Mult): string {
   if (!mult) return "";
   return mult;
@@ -108,85 +112,128 @@ function bgClass(mult: Mult): string {
   }
 }
 
+/* =========================================================
+   Page component (state + rendering)
+   ========================================================= */
+
 export default function Page() {
-  const [bag] = useState(() => buildBag());
-  const [rack] = useState<Tile[]>(() => bag.slice(0, 7));
+  const multipliers = useMemo(() => buildScrabbleMultipliers(), []);
+
+  // Game state (client-only right now)
+  const [bag, setBag] = useState<Tile[]>([]);
+  const [rack, setRack] = useState<Tile[]>([]);
   const [activePlayer] = useState("Player 1");
 
-  const multipliers = buildScrabbleMultipliers();
+  // Client-only init: avoids hydration mismatch from Math.random() shuffle
+  useEffect(() => {
+    const b = buildBag();
+    setBag(b);
+    setRack(b.slice(0, 7));
+  }, []);
+
+  const hasRack = rack.length > 0;
 
   return (
     <main className="min-h-screen bg-neutral-50 p-6">
       <div className="mx-auto max-w-4xl">
+        {/* Header */}
         <h1 className="text-2xl font-semibold">Girlfriend Mode</h1>
-        <p className="mt-1 text-sm text-neutral-600">
-          v0: board layout + multipliers only
-        </p>
 
-<div className="rounded-xl border border-neutral-200 bg-white p-3 shadow-sm">
-  <TransformWrapper
-    initialScale={0.7}
-    minScale={0.4}
-    maxScale={2.2}
-    centerOnInit
-    doubleClick={{ disabled: true }}
-    wheel={{ step: 0.08 }}
-    panning={{ velocityDisabled: true }}
-  >
-    {({ zoomIn, zoomOut, resetTransform }) => (
-      <>
-        <div className="mb-2 flex gap-2">
-          <button onClick={() => zoomOut()} className="rounded-md border px-2 py-1 text-sm">−</button>
-          <button onClick={() => zoomIn()} className="rounded-md border px-2 py-1 text-sm">+</button>
-          <button onClick={() => resetTransform()} className="rounded-md border px-2 py-1 text-sm">Reset</button>
-        </div>
-
-        <div className="overflow-hidden rounded-lg border border-neutral-200">
-          <TransformComponent
-            wrapperStyle={{ width: "100%", height: "70vh" }}
-            contentStyle={{ width: "fit-content", height: "fit-content" }}
+        {/* Board + zoom/pan */}
+        <div className="rounded-xl border border-neutral-200 bg-white p-3 shadow-sm">
+  {/* Square board viewport */}
+  <div className="aspect-square w-full">
+          <TransformWrapper
+            initialScale={0.87}
+            minScale={0.4}
+            maxScale={2.2}
+            centerOnInit
+            doubleClick={{ disabled: true }}
+            wheel={{ step: 0.08 }}
+            panning={{ velocityDisabled: true }}
           >
-            {/* your existing 15x15 grid goes here unchanged */}
+            {({ zoomIn, zoomOut, resetTransform }) => (
+              <>
+                {/* Zoom controls */}
+                <div className="mb-2 flex gap-2">
+                  <button onClick={() => zoomOut()} className="rounded-md border px-2 py-1 text-sm">−</button>
+                  <button onClick={() => zoomIn()} className="rounded-md border px-2 py-1 text-sm">+</button>
+                  <button onClick={() => resetTransform()} className="rounded-md border px-2 py-1 text-sm">Reset</button>
+                </div>
+
+                {/* Zoom viewport */}
+                <div className="overflow-hidden rounded-lg border border-neutral-200">
+  <TransformComponent
+    wrapperStyle={{ width: "100%", height: "100%" }}
+    contentStyle={{
+      width: "100%",
+      height: "100%",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+    }}
+  >
+    {/* Board grid */}
+    <div
+      className="grid gap-[2px]"
+      style={{
+        // Responsive tiles: fits on iPhone, still looks good on desktop
+        gridTemplateColumns: `repeat(15, clamp(18px, 5.5vw, 34px))`,
+        gridTemplateRows: `repeat(15, clamp(18px, 5.5vw, 34px))`,
+      }}
+    >
+      {multipliers.map((row, r) =>
+        row.map((cell, c) => {
+          const isCenter = r === 7 && c === 7;
+          return (
             <div
-              className="grid gap-[2px]"
-              style={{
-                gridTemplateColumns: `repeat(15, 40px)`,
-                gridTemplateRows: `repeat(15, 40px)`,
-              }}
+              key={`${r}-${c}`}
+              className={[
+                "flex items-center justify-center rounded-md border border-neutral-200 text-[10px] font-semibold text-neutral-700",
+                bgClass(cell),
+              ].join(" ")}
+              title={`(${r + 1}, ${c + 1}) ${cell ?? "—"}`}
             >
-              {/* ...cells... */}
+              {isCenter ? "★" : labelFor(cell)}
             </div>
-          </TransformComponent>
-        </div>
-      </>
-    )}
-  </TransformWrapper>
+          );
+        })
+      )}
+    </div>
+  </TransformComponent>
 </div>
-
-        <div className="mt-6">
-        <div className="text-sm text-neutral-600">Turn</div>
-        <div className="text-lg font-semibold">{activePlayer}</div>
-
-        <div className="mt-4 flex gap-2">
-          {rack.map((t) => (
-            <div
-              key={t.id}
-              className="relative h-12 w-12 rounded-lg border border-neutral-300 bg-amber-50 shadow-sm"
-            >
-              <div className="flex h-full items-center justify-center text-lg font-bold">
-                {t.letter}
-              </div>
-              <div className="absolute bottom-1 right-1 text-[10px] font-semibold">
-                {t.value}
-              </div>
-            </div>
-          ))}
+              </>
+            )}
+          </TransformWrapper>
         </div>
-      </div>
+        </div>
 
+        {/* Turn + rack */}
+        <div className="mt-6">
+          <div className="text-sm text-neutral-600">Turn</div>
+          <div className="text-lg font-semibold">{activePlayer}</div>
 
-        <div className="mt-4 text-xs text-neutral-500">
-          Legend: TW (triple word), DW (double word), TL (triple letter), DL (double letter)
+          <div className="mt-2 text-xs text-neutral-500">
+            Tiles in bag: {bag.length}
+          </div>
+
+          {hasRack && (
+            <div className="mt-4 flex gap-2">
+              {rack.map((t) => (
+                <div
+                  key={t.id}
+                  className="relative h-12 w-12 rounded-lg border border-neutral-300 bg-amber-50 shadow-sm"
+                >
+                  <div className="flex h-full items-center justify-center text-lg font-bold">
+                    {t.letter}
+                  </div>
+                  <div className="absolute bottom-1 right-1 text-[10px] font-semibold">
+                    {t.value}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </main>

@@ -116,7 +116,7 @@ function bgClass(mult: Mult): string {
    Page component (state + rendering)
    ========================================================= */
 
-export default function Game() {
+export default function Game({ gameId }: { gameId?: string }) {
   const multipliers = useMemo(() => buildScrabbleMultipliers(), []);
 
   // Game state (client-only right now)
@@ -136,7 +136,14 @@ export default function Game() {
       <div className="w-full max-w-md flex flex-col gap-3 -translate-y-10">
 
         {/* Header */}
-        <h1 className="text-2xl">Girlfriend Mode</h1>
+        <div className="text-center">
+          <h1 className="text-2xl">Girlfriend Mode</h1>
+          {gameId && (
+            <p className="text-sm text-neutral-600 mt-1">
+              Game ID: <code className="bg-neutral-100 px-2 py-1 rounded text-xs">{gameId}</code>
+            </p>
+          )}
+        </div>
 
         {/* Board + zoom/pan */}
         <div className="rounded-xl border border-neutral-200 bg-white p-3 shadow-sm">

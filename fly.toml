@@ -7,6 +7,15 @@ app = 'girlfriend-mode'
 primary_region = 'ewr'
 
 [build]
+  [build.args]
+    NEXT_PUBLIC_FIREBASE_API_KEY = "AIzaSyAwIvDHx94qQVkHmgpjjsNN5GgOhJdqrQ4"
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN = "girlfriend-mode.firebaseapp.com"
+    NEXT_PUBLIC_FIREBASE_DATABASE_URL = "https://girlfriend-mode-default-rtdb.firebaseio.com"
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID = "girlfriend-mode"
+    NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET = "girlfriend-mode.firebasestorage.app"
+    NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID = "112617862192"
+    NEXT_PUBLIC_FIREBASE_APP_ID = "1:112617862192:web:f40a5d43b5fbfcef3829f5"
+    NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID = "G-1BHK9VL825"
 
 [http_service]
   internal_port = 3000

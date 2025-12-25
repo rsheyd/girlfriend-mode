@@ -127,10 +127,6 @@ export default function Page() {
             </div>
           )}
         </div>
-
-        <div className="text-center text-sm text-neutral-600">
-          Scrabble for two players
-        </div>
       </div>
     </main>
   );

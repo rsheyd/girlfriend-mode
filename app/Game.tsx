@@ -125,12 +125,16 @@ export default function Game({ gameId }: { gameId?: string }) {
 
   // Game state (client-only right now)
   const initialBag = useMemo(() => buildBag(), []);
-  const [bag] = useState(() => initialBag.slice(7));
+  const [bag, setBag] = useState(() => initialBag.slice(7));
   const [rack, setRack] = useState(() => initialBag.slice(0, 7));
   const [boardTiles, setBoardTiles] = useState<(Tile | null)[][]>(() =>
     Array.from({ length: 15 }, () => Array.from({ length: 15 }, () => null))
   );
   const [selectedTileId, setSelectedTileId] = useState<string | null>(null);
+  const [lockedPositions, setLockedPositions] = useState<Set<string>>(() => new Set());
+  const [stagedPositions, setStagedPositions] = useState<Set<string>>(() => new Set());
+  const [score, setScore] = useState(0);
+  const [lastMoveScore, setLastMoveScore] = useState<number | null>(null);
   const [pointerDrag, setPointerDrag] = useState<{
     tile: Tile;
     source:
@@ -145,6 +149,8 @@ export default function Game({ gameId }: { gameId?: string }) {
 
   const hasRack = rack.length > 0;
   const selectedTile = selectedTileId ? rack.find((t) => t.id === selectedTileId) ?? null : null;
+  const isLocked = (row: number, col: number) => lockedPositions.has(`${row},${col}`);
+  const isStaged = (row: number, col: number) => stagedPositions.has(`${row},${col}`);
 
   const handleRackTileClick = (tileId: string) => {
     if (suppressClickRef.current) return;
@@ -161,14 +167,25 @@ export default function Game({ gameId }: { gameId?: string }) {
         const next = current.map((r) => r.slice());
         next[row][col] = selectedTile;
         setRack((prevRack) => prevRack.filter((tile) => tile.id !== selectedTile.id));
+        setStagedPositions((prev) => {
+          const nextPositions = new Set(prev);
+          nextPositions.add(`${row},${col}`);
+          return nextPositions;
+        });
         setSelectedTileId(null);
         return next;
       }
 
       if (cell) {
+        if (isLocked(row, col)) return current;
         const next = current.map((r) => r.slice());
         next[row][col] = null;
         setRack((prevRack) => [...prevRack, cell]);
+        setStagedPositions((prev) => {
+          const nextPositions = new Set(prev);
+          nextPositions.delete(`${row},${col}`);
+          return nextPositions;
+        });
         return next;
       }
 
@@ -256,10 +273,16 @@ export default function Game({ gameId }: { gameId?: string }) {
           const next = current.map((r) => r.slice());
           next[dropTarget.row][dropTarget.col] = dragState.tile;
           setRack((prevRack) => prevRack.filter((t) => t.id !== dragState.tile.id));
+          setStagedPositions((prev) => {
+            const nextPositions = new Set(prev);
+            nextPositions.add(`${dropTarget.row},${dropTarget.col}`);
+            return nextPositions;
+          });
           return next;
         }
 
         if (dragState.source.type === "board") {
+          if (isLocked(dragState.source.row, dragState.source.col)) return current;
           if (dragState.source.row === dropTarget.row && dragState.source.col === dropTarget.col) {
             return current;
           }
@@ -268,6 +291,12 @@ export default function Game({ gameId }: { gameId?: string }) {
           if (!tile) return current;
           next[dragState.source.row][dragState.source.col] = null;
           next[dropTarget.row][dropTarget.col] = tile;
+          setStagedPositions((prev) => {
+            const nextPositions = new Set(prev);
+            nextPositions.delete(`${dragState.source.row},${dragState.source.col}`);
+            nextPositions.add(`${dropTarget.row},${dropTarget.col}`);
+            return nextPositions;
+          });
           return next;
         }
 
@@ -280,13 +309,122 @@ export default function Game({ gameId }: { gameId?: string }) {
         const next = current.map((r) => r.slice());
         const tile = next[dragState.source.row][dragState.source.col];
         if (!tile) return current;
+        if (isLocked(dragState.source.row, dragState.source.col)) return current;
         next[dragState.source.row][dragState.source.col] = null;
         setRack((prevRack) => [...prevRack, tile]);
+        setStagedPositions((prev) => {
+          const nextPositions = new Set(prev);
+          nextPositions.delete(`${dragState.source.row},${dragState.source.col}`);
+          return nextPositions;
+        });
         return next;
       });
     }
 
     setPointerDrag(null);
+  };
+
+  const computeMoveScore = () => {
+    const staged = Array.from(stagedPositions).map((pos) => {
+      const [row, col] = pos.split(",").map(Number);
+      return { row, col };
+    });
+
+    if (staged.length === 0) return null;
+
+    const sameRow = staged.every((pos) => pos.row === staged[0].row);
+    const sameCol = staged.every((pos) => pos.col === staged[0].col);
+
+    if (!sameRow && !sameCol) {
+      return { error: "Place tiles in a single row or column." };
+    }
+
+    const isHorizontal = sameRow;
+    const row = staged[0].row;
+    const col = staged[0].col;
+
+    let startRow = row;
+    let startCol = col;
+    let endRow = row;
+    let endCol = col;
+
+    if (isHorizontal) {
+      const cols = staged.map((pos) => pos.col);
+      startCol = Math.min(...cols);
+      endCol = Math.max(...cols);
+      while (startCol > 0 && boardTiles[row][startCol - 1]) startCol -= 1;
+      while (endCol < 14 && boardTiles[row][endCol + 1]) endCol += 1;
+    } else {
+      const rows = staged.map((pos) => pos.row);
+      startRow = Math.min(...rows);
+      endRow = Math.max(...rows);
+      while (startRow > 0 && boardTiles[startRow - 1][col]) startRow -= 1;
+      while (endRow < 14 && boardTiles[endRow + 1][col]) endRow += 1;
+    }
+
+    const tiles: Array<{ row: number; col: number; tile: Tile }> = [];
+    if (isHorizontal) {
+      for (let c = startCol; c <= endCol; c += 1) {
+        const tile = boardTiles[row][c];
+        if (!tile) return { error: "There is a gap in the word." };
+        tiles.push({ row, col: c, tile });
+      }
+    } else {
+      for (let r = startRow; r <= endRow; r += 1) {
+        const tile = boardTiles[r][col];
+        if (!tile) return { error: "There is a gap in the word." };
+        tiles.push({ row: r, col, tile });
+      }
+    }
+
+    let wordMultiplier = 1;
+    let letterSum = 0;
+
+    for (const tile of tiles) {
+      const base = tile.tile.value;
+      if (isStaged(tile.row, tile.col)) {
+        const mult = multipliers[tile.row][tile.col];
+        if (mult === "DL") letterSum += base * 2;
+        else if (mult === "TL") letterSum += base * 3;
+        else letterSum += base;
+
+        if (mult === "DW") wordMultiplier *= 2;
+        if (mult === "TW") wordMultiplier *= 3;
+      } else {
+        letterSum += base;
+      }
+    }
+
+    return { score: letterSum * wordMultiplier };
+  };
+
+  const handleCommitMove = () => {
+    const result = computeMoveScore();
+    if (!result) {
+      alert("Place at least one tile before committing.");
+      return;
+    }
+    if ("error" in result) {
+      alert(result.error);
+      return;
+    }
+
+    setScore((prev) => prev + result.score);
+    setLastMoveScore(result.score);
+    setLockedPositions((prev) => {
+      const next = new Set(prev);
+      for (const pos of stagedPositions) next.add(pos);
+      return next;
+    });
+    setStagedPositions(new Set());
+
+    setRack((prevRack) => {
+      const need = Math.max(0, 7 - prevRack.length);
+      if (need === 0) return prevRack;
+      const drawn = bag.slice(0, need);
+      setBag((prevBag) => prevBag.slice(need));
+      return [...prevRack, ...drawn];
+    });
   };
 
   useEffect(() => {
@@ -420,6 +558,8 @@ export default function Game({ gameId }: { gameId?: string }) {
                                 // font scales with cell size
                                 "text-[clamp(8px,1.8vw,10px)]",
                                 tile ? "bg-amber-50" : bgClass(cell),
+                                isStaged(r, c) ? "ring-2 ring-blue-300" : "",
+                                isLocked(r, c) ? "opacity-90" : "",
                               ].join(" ")}
                               title={`(${r + 1}, ${c + 1}) ${cell ?? "—"}`}
                               onClick={() => handleBoardCellClick(r, c)}
@@ -480,15 +620,26 @@ export default function Game({ gameId }: { gameId?: string }) {
               ))}
             </div>
           )}
-          {/* Turn + Player + Bag */}
-          <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-sm">
+          {/* Turn + Commit + Bag */}
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-sm">
             <div>
-              Turn: {activePlayer}
+              <div>Turn: {activePlayer}</div>
+              <div>Tiles in bag: {bag.length}</div>
             </div>
+            {stagedPositions.size > 0 && (
+              <button
+                onClick={handleCommitMove}
+                className="rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                Play Word
+              </button>
+            )}
             <div>
-              Tiles in bag: {bag.length}
-            </div>
+            Your Score: {score}
+            {lastMoveScore !== null && <span className="text-neutral-400"> (+{lastMoveScore})</span>}
           </div>
+          </div>
+          
         </div>
       </div>
       {pointerDrag && (

@@ -1,0 +1,15 @@
+{
+  "rules": {
+    "games": {
+      ".read": "auth != null && ((query.orderByChild == 'player1Uid' && query.equalTo == auth.uid) || (query.orderByChild == 'player2Uid' && query.equalTo == auth.uid) || (query.orderByChild == 'invitedEmail' && query.equalTo == auth.token.email))",
+			".write": "auth != null && (data.child('player1Uid').val() === auth.uid || !data.exists())",
+      ".indexOn": ["player1Uid", "player2Uid", "invitedEmail"],
+      "$gameId": {
+"$gameId": {
+  ".read": "auth != null && (!data.exists() || data.child('player1Uid').val() === auth.uid || data.child('player2Uid').val() === auth.uid || (data.child('invitedEmail').val() != null && data.child('invitedEmail').val() === auth.token.email))",
+  ".write": "auth != null && (data.child('player1Uid').val() === auth.uid || data.child('player2Uid').val() === auth.uid || !data.child('player2Uid').exists())"
+}
+      }
+    }
+  }
+}

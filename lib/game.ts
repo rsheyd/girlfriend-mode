@@ -8,6 +8,7 @@ export interface Game {
   player1Uid: string;
   player2Uid: string | null;
   activePlayerUid: string;
+  invitedEmail?: string | null;
   bag: Tile[];
   racks: Record<string, Tile[]>;
   boardTiles: Record<string, Tile>;
@@ -45,7 +46,7 @@ async function generateUniqueGameId(): Promise<string> {
   throw new Error('Failed to generate a unique game id');
 }
 
-export async function createGame(creatorUid: string): Promise<string> {
+export async function createGame(creatorUid: string, invitedEmail?: string): Promise<string> {
   const bag = buildBag();
 
   // Deal 7 tiles to creator
@@ -56,6 +57,7 @@ export async function createGame(creatorUid: string): Promise<string> {
     player1Uid: creatorUid,
     player2Uid: null,
     activePlayerUid: creatorUid,
+    invitedEmail: invitedEmail?.trim().toLowerCase() || null,
     bag,
     racks: {
       [creatorUid]: creatorRack,
@@ -125,14 +127,18 @@ export async function deleteGame(gameId: string): Promise<void> {
   await remove(ref(db, `games/${gameId}`));
 }
 
-export async function listGamesForUser(userUid: string): Promise<GameWithId[]> {
+export async function listGamesForUser(userUid: string, userEmail?: string): Promise<GameWithId[]> {
   const gamesRef = ref(db, 'games');
   const player1Query = query(gamesRef, orderByChild('player1Uid'), equalTo(userUid));
   const player2Query = query(gamesRef, orderByChild('player2Uid'), equalTo(userUid));
+  const inviteQuery = userEmail
+    ? query(gamesRef, orderByChild('invitedEmail'), equalTo(userEmail.toLowerCase()))
+    : null;
 
-  const [player1Snap, player2Snap] = await Promise.all([
+  const [player1Snap, player2Snap, inviteSnap] = await Promise.all([
     get(player1Query),
     get(player2Query),
+    inviteQuery ? get(inviteQuery) : Promise.resolve(null),
   ]);
 
   const games = new Map<string, Game>();
@@ -149,6 +155,7 @@ export async function listGamesForUser(userUid: string): Promise<GameWithId[]> {
 
   addSnapshot(player1Snap);
   addSnapshot(player2Snap);
+  if (inviteSnap) addSnapshot(inviteSnap);
 
   return Array.from(games.entries())
     .map(([id, game]) => ({ id, game }))

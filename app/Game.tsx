@@ -7,7 +7,7 @@ import { Tile } from "@/lib/tiles";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { useGame } from "@/lib/useGame";
 import { useAuth } from "@/lib/useAuth";
-import { commitMove } from "@/lib/game";
+import { commitMove, joinGame } from "@/lib/game";
 
 type Mult = "TW" | "DW" | "TL" | "DL" | null;
 
@@ -56,6 +56,23 @@ function boardToMap(board: (Tile | null)[][]): Record<string, Tile> {
     }
   }
   return map;
+}
+
+function addToSet(prev: Set<string>, value: string): Set<string> {
+  const next = new Set(prev);
+  next.add(value);
+  return next;
+}
+
+function removeFromSet(prev: Set<string>, value: string): Set<string> {
+  const next = new Set(prev);
+  next.delete(value);
+  return next;
+}
+
+function appendToRack(prevRack: Tile[], tiles: Tile | Tile[]): Tile[] {
+  const incoming = Array.isArray(tiles) ? tiles : [tiles];
+  return [...prevRack, ...incoming];
 }
 
 /*** Classic Scrabble multiplier layout (15x15). This encodes one quadrant and mirrors it for symmetry. */
@@ -172,6 +189,7 @@ export default function Game({ gameId }: { gameId?: string }) {
   const [lockedPositions, setLockedPositions] = useState<Set<string>>(() => new Set());
   const [stagedPositions, setStagedPositions] = useState<Set<string>>(() => new Set());
   const [lastMoveScore, setLastMoveScore] = useState<number | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
   const [pointerDrag, setPointerDrag] = useState<{
     tile: Tile;
     source:
@@ -182,6 +200,7 @@ export default function Game({ gameId }: { gameId?: string }) {
     hasMoved: boolean;
   } | null>(null);
   const pointerDragRef = useRef<typeof pointerDrag>(null);
+  const joinAttemptedRef = useRef(false);
 
   const activePlayer = useMemo(() => {
     if (!game) return "Player 1";
@@ -219,6 +238,22 @@ export default function Game({ gameId }: { gameId?: string }) {
     setStagedPositions(new Set());
   }, [game, user?.uid]);
 
+  useEffect(() => {
+    if (!game || !user || joinAttemptedRef.current) return;
+    if (game.status !== "waiting") return;
+    if (game.player1Uid === user.uid) return;
+    if (game.player2Uid) return;
+    if (!game.invitedEmail) return;
+    if (!user.email) return;
+    if (game.invitedEmail.toLowerCase() !== user.email.toLowerCase()) return;
+
+    joinAttemptedRef.current = true;
+    joinGame(gameId as string, user.uid).catch((error) => {
+      console.error("Failed to auto-join game:", error);
+      joinAttemptedRef.current = false;
+    });
+  }, [game, user, gameId]);
+
   const hasRack = rack.length > 0;
   const selectedTile = selectedTileId ? rack.find((t) => t.id === selectedTileId) ?? null : null;
   const isLocked = (row: number, col: number) => lockedPositions.has(`${row},${col}`);
@@ -226,11 +261,13 @@ export default function Game({ gameId }: { gameId?: string }) {
 
   const handleRackTileClick = (tileId: string) => {
     if (suppressClickRef.current) return;
+    setMoveError(null);
     setSelectedTileId((current) => (current === tileId ? null : tileId));
   };
 
   const handleBoardCellClick = (row: number, col: number) => {
     if (suppressClickRef.current) return;
+    setMoveError(null);
     setBoardTiles((current) => {
       const cell = current[row][col];
 
@@ -239,11 +276,7 @@ export default function Game({ gameId }: { gameId?: string }) {
         const next = current.map((r) => r.slice());
         next[row][col] = selectedTile;
         setRack((prevRack) => prevRack.filter((tile) => tile.id !== selectedTile.id));
-        setStagedPositions((prev) => {
-          const nextPositions = new Set(prev);
-          nextPositions.add(`${row},${col}`);
-          return nextPositions;
-        });
+        setStagedPositions((prev) => addToSet(prev, `${row},${col}`));
         setSelectedTileId(null);
         return next;
       }
@@ -252,12 +285,8 @@ export default function Game({ gameId }: { gameId?: string }) {
         if (isLocked(row, col)) return current;
         const next = current.map((r) => r.slice());
         next[row][col] = null;
-        setRack((prevRack) => (prevRack.some((t) => t.id === cell.id) ? prevRack : [...prevRack, cell]));
-        setStagedPositions((prev) => {
-          const nextPositions = new Set(prev);
-          nextPositions.delete(`${row},${col}`);
-          return nextPositions;
-        });
+        setRack((prevRack) => appendToRack(prevRack, cell));
+        setStagedPositions((prev) => removeFromSet(prev, `${row},${col}`));
         return next;
       }
 
@@ -274,6 +303,7 @@ export default function Game({ gameId }: { gameId?: string }) {
   ) => {
     event.preventDefault();
     event.stopPropagation();
+    setMoveError(null);
     setSelectedTileId(null);
     setPointerDrag({
       tile,
@@ -335,21 +365,18 @@ export default function Game({ gameId }: { gameId?: string }) {
       setPointerDrag(null);
       return;
     }
+    setMoveError(null);
 
     if (dropTarget.type === "board") {
       setBoardTiles((current) => {
-        const cell = current[dropTarget.row][dropTarget.col];
+        const cell = current[dropTarget.row]?.[dropTarget.col];
         if (cell) return current;
 
         if (dragState.source.type === "rack") {
           const next = current.map((r) => r.slice());
           next[dropTarget.row][dropTarget.col] = dragState.tile;
           setRack((prevRack) => prevRack.filter((t) => t.id !== dragState.tile.id));
-          setStagedPositions((prev) => {
-            const nextPositions = new Set(prev);
-            nextPositions.add(`${dropTarget.row},${dropTarget.col}`);
-            return nextPositions;
-          });
+          setStagedPositions((prev) => addToSet(prev, `${dropTarget.row},${dropTarget.col}`));
           return next;
         }
 
@@ -363,12 +390,9 @@ export default function Game({ gameId }: { gameId?: string }) {
           if (!tile) return current;
           next[dragState.source.row][dragState.source.col] = null;
           next[dropTarget.row][dropTarget.col] = tile;
-          setStagedPositions((prev) => {
-            const nextPositions = new Set(prev);
-            nextPositions.delete(`${dragState.source.row},${dragState.source.col}`);
-            nextPositions.add(`${dropTarget.row},${dropTarget.col}`);
-            return nextPositions;
-          });
+          setStagedPositions((prev) =>
+            addToSet(removeFromSet(prev, `${dragState.source.row},${dragState.source.col}`), `${dropTarget.row},${dropTarget.col}`)
+          );
           return next;
         }
 
@@ -383,12 +407,8 @@ export default function Game({ gameId }: { gameId?: string }) {
         if (!tile) return current;
         if (isLocked(dragState.source.row, dragState.source.col)) return current;
         next[dragState.source.row][dragState.source.col] = null;
-        setRack((prevRack) => (prevRack.some((t) => t.id === tile.id) ? prevRack : [...prevRack, tile]));
-        setStagedPositions((prev) => {
-          const nextPositions = new Set(prev);
-          nextPositions.delete(`${dragState.source.row},${dragState.source.col}`);
-          return nextPositions;
-        });
+        setRack((prevRack) => appendToRack(prevRack, tile));
+        setStagedPositions((prev) => removeFromSet(prev, `${dragState.source.row},${dragState.source.col}`));
         return next;
       });
     }
@@ -403,6 +423,10 @@ export default function Game({ gameId }: { gameId?: string }) {
     });
 
     if (staged.length === 0) return null;
+
+    if (lockedPositions.size === 0 && !stagedPositions.has("7,7")) {
+      return { error: "First move must use the center square." };
+    }
 
     const sameRow = staged.every((pos) => pos.row === staged[0].row);
     const sameCol = staged.every((pos) => pos.col === staged[0].col);
@@ -474,15 +498,16 @@ export default function Game({ gameId }: { gameId?: string }) {
     if (!gameId || !game || !user?.uid) return;
     const result = computeMoveScore();
     if (!result) {
-      alert("Place at least one tile before committing.");
+      setMoveError("Place at least one tile before committing.");
       return;
     }
     if ("error" in result) {
-      alert(result.error);
+      setMoveError(result.error);
       return;
     }
 
     setLastMoveScore(result.score);
+    setMoveError(null);
     const need = Math.max(0, 7 - rack.length);
     const drawn = bag.slice(0, need);
     const nextBag = bag.slice(need);
@@ -514,6 +539,29 @@ export default function Game({ gameId }: { gameId?: string }) {
     });
 
     setStagedPositions(new Set());
+  };
+
+  const handleResetMove = () => {
+    if (stagedPositions.size === 0) return;
+    setMoveError(null);
+    setBoardTiles((current) => {
+      const next = current.map((row) => row.slice());
+      const returned: Tile[] = [];
+      stagedPositions.forEach((pos) => {
+        const [row, col] = pos.split(",").map(Number);
+        const tile = next[row]?.[col];
+        if (tile) {
+          next[row][col] = null;
+          returned.push(tile);
+        }
+      });
+      if (returned.length > 0) {
+        setRack((prevRack) => appendToRack(prevRack, returned));
+      }
+      return next;
+    });
+    setStagedPositions(new Set());
+    setSelectedTileId(null);
   };
 
   useEffect(() => {
@@ -583,6 +631,7 @@ export default function Game({ gameId }: { gameId?: string }) {
         <div className="flex items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl">Girlfriend Mode</h1>
+            <div className="text-xs text-neutral-500">-- a slightly unfair word game</div>
             {gameId && (
               <p className="text-sm text-neutral-600 mt-1">
                 Game ID: <code className="bg-neutral-100 px-2 py-1 rounded text-xs">{gameId}</code>
@@ -717,14 +766,23 @@ export default function Game({ gameId }: { gameId?: string }) {
             <div>
               <div>Turn: {activePlayer}</div>
               <div>Tiles in bag: {bag.length}</div>
+              {moveError && <div className="mt-1 text-xs text-red-600">{moveError}</div>}
             </div>
             {stagedPositions.size > 0 && (
-              <button
-                onClick={handleCommitMove}
-                className="rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-              >
-                Play Word
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleResetMove}
+                  className="rounded-md border border-neutral-200 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100"
+                >
+                  Reset
+                </button>
+                <button
+                  onClick={handleCommitMove}
+                  className="rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                >
+                  Play Word
+                </button>
+              </div>
             )}
             <div>
               Your Score: {currentScore}

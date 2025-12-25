@@ -1,6 +1,7 @@
 // app/Game.tsx
 "use client";
 
+import Link from "next/link";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { buildBag, Tile } from "@/lib/tiles";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
@@ -349,13 +350,21 @@ export default function Game({ gameId }: { gameId?: string }) {
       <div className="w-full max-w-md flex flex-col gap-3 -translate-y-10">
 
         {/* Header */}
-        <div className="text-center">
-          <h1 className="text-2xl">Girlfriend Mode</h1>
-          {gameId && (
-            <p className="text-sm text-neutral-600 mt-1">
-              Game ID: <code className="bg-neutral-100 px-2 py-1 rounded text-xs">{gameId}</code>
-            </p>
-          )}
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl">Girlfriend Mode</h1>
+            {gameId && (
+              <p className="text-sm text-neutral-600 mt-1">
+                Game ID: <code className="bg-neutral-100 px-2 py-1 rounded text-xs">{gameId}</code>
+              </p>
+            )}
+          </div>
+          <Link
+            href="/"
+            className="rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100"
+          >
+            Home
+          </Link>
         </div>
 
         {/* Board + zoom/pan */}

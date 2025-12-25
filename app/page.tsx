@@ -7,6 +7,8 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '../lib/useAuth';
 import { Auth } from './Auth';
 import { createGame, listGamesForUser, GameWithId } from '../lib/game';
+import { signOut } from 'firebase/auth';
+import { auth } from '../lib/firebase';
 
 const Game = dynamic(() => import('./Game'), { ssr: false });
 
@@ -17,6 +19,7 @@ export default function Page() {
   const [gamesLoading, setGamesLoading] = useState(false);
   const [gamesError, setGamesError] = useState<string | null>(null);
   const [games, setGames] = useState<GameWithId[]>([]);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -61,10 +64,31 @@ export default function Page() {
     }
   };
 
+  const handleSignOut = async () => {
+    try {
+      setSigningOut(true);
+      await signOut(auth);
+    } catch (error) {
+      console.error('Failed to sign out:', error);
+      alert('Failed to sign out. Please try again.');
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-neutral-50 p-4 flex items-center justify-center text-slate-800">
       <div className="w-full max-w-md flex flex-col gap-4">
-        <h1 className="text-2xl font-bold text-center">Girlfriend Mode</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Girlfriend Mode</h1>
+          <button
+            onClick={handleSignOut}
+            disabled={signingOut}
+            className="rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 disabled:opacity-50"
+          >
+            {signingOut ? 'Signing out...' : 'Sign out'}
+          </button>
+        </div>
 
         <div className="bg-white rounded-xl border border-neutral-200 p-6 shadow-sm">
           <button

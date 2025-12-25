@@ -1,7 +1,7 @@
-# Firebase Realtime Database Architecture for Scrabble Game
+# Firebase Realtime Database Architecture for Scrabble-type Game
 
 ## Overview
-The Scrabble game uses Firebase Realtime Database (RTDB) to store game state, enabling real-time multiplayer functionality. The database is organized hierarchically with games as the primary entity.
+The Scrabble-type game uses Firebase Realtime Database (RTDB) to store game state, enabling real-time multiplayer functionality. The database is organized hierarchically with games as the primary entity.
 
 ## Database Structure
 

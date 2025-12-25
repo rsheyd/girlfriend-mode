@@ -3,8 +3,11 @@
 
 import Link from "next/link";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { buildBag, Tile } from "@/lib/tiles";
+import { Tile } from "@/lib/tiles";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
+import { useGame } from "@/lib/useGame";
+import { useAuth } from "@/lib/useAuth";
+import { commitMove } from "@/lib/game";
 
 type Mult = "TW" | "DW" | "TL" | "DL" | null;
 
@@ -16,6 +19,43 @@ type Mult = "TW" | "DW" | "TL" | "DL" | null;
 function makeEmptyBoard(): Mult[][] {
   const size = 15;
   return Array.from({ length: size }, () => Array.from({ length: size }, () => null));
+}
+
+function makeEmptyTileBoard(): (Tile | null)[][] {
+  const size = 15;
+  return Array.from({ length: size }, () => Array.from({ length: size }, () => null));
+}
+
+function keyFor(row: number, col: number): string {
+  return `r${row}_c${col}`;
+}
+
+function mapToBoard(input?: Record<string, Tile>): (Tile | null)[][] {
+  if (!input) return makeEmptyTileBoard();
+  const board = makeEmptyTileBoard();
+  for (const [key, tile] of Object.entries(input)) {
+    const match = /^r(\d+)_c(\d+)$/.exec(key);
+    if (!match) continue;
+    const row = Number(match[1]);
+    const col = Number(match[2]);
+    if (Number.isNaN(row) || Number.isNaN(col)) continue;
+    if (row < 0 || row > 14 || col < 0 || col > 14) continue;
+    board[row][col] = tile;
+  }
+  return board;
+}
+
+function boardToMap(board: (Tile | null)[][]): Record<string, Tile> {
+  const map: Record<string, Tile> = {};
+  for (let row = 0; row < 15; row += 1) {
+    for (let col = 0; col < 15; col += 1) {
+      const tile = board[row]?.[col];
+      if (tile) {
+        map[keyFor(row, col)] = tile;
+      }
+    }
+  }
+  return map;
 }
 
 /*** Classic Scrabble multiplier layout (15x15). This encodes one quadrant and mirrors it for symmetry. */
@@ -122,18 +162,15 @@ export default function Game({ gameId }: { gameId?: string }) {
   const boardRef = useRef<HTMLDivElement | null>(null);
   const rackRef = useRef<HTMLDivElement | null>(null);
   const suppressClickRef = useRef(false);
+  const { user } = useAuth();
+  const { game, loading, error } = useGame(gameId);
 
-  // Game state (client-only right now)
-  const initialBag = useMemo(() => buildBag(), []);
-  const [bag, setBag] = useState(() => initialBag.slice(7));
-  const [rack, setRack] = useState(() => initialBag.slice(0, 7));
-  const [boardTiles, setBoardTiles] = useState<(Tile | null)[][]>(() =>
-    Array.from({ length: 15 }, () => Array.from({ length: 15 }, () => null))
-  );
+  const [bag, setBag] = useState<Tile[]>([]);
+  const [rack, setRack] = useState<Tile[]>([]);
+  const [boardTiles, setBoardTiles] = useState<(Tile | null)[][]>(() => makeEmptyTileBoard());
   const [selectedTileId, setSelectedTileId] = useState<string | null>(null);
   const [lockedPositions, setLockedPositions] = useState<Set<string>>(() => new Set());
   const [stagedPositions, setStagedPositions] = useState<Set<string>>(() => new Set());
-  const [score, setScore] = useState(0);
   const [lastMoveScore, setLastMoveScore] = useState<number | null>(null);
   const [pointerDrag, setPointerDrag] = useState<{
     tile: Tile;
@@ -145,7 +182,42 @@ export default function Game({ gameId }: { gameId?: string }) {
     hasMoved: boolean;
   } | null>(null);
   const pointerDragRef = useRef<typeof pointerDrag>(null);
-  const [activePlayer] = useState("Player 1");
+
+  const activePlayer = useMemo(() => {
+    if (!game) return "Player 1";
+    if (game.activePlayerUid === game.player1Uid) return "Player 1";
+    if (game.player2Uid && game.activePlayerUid === game.player2Uid) return "Player 2";
+    return "Player 1";
+  }, [game]);
+
+  const currentScore = useMemo(() => {
+    if (!user?.uid || !game?.scores) return 0;
+    return game.scores[user.uid] ?? 0;
+  }, [game?.scores, user?.uid]);
+
+  useEffect(() => {
+    if (!game) return;
+    const nextBoard = mapToBoard(game.boardTiles as Record<string, Tile>);
+    setBag(game.bag ?? []);
+    if (user?.uid) {
+      setRack(game.racks?.[user.uid] ?? []);
+    } else {
+      setRack([]);
+    }
+    setBoardTiles(nextBoard);
+    setLockedPositions(() => {
+      const next = new Set<string>();
+      for (let r = 0; r < 15; r += 1) {
+        for (let c = 0; c < 15; c += 1) {
+          if (nextBoard[r]?.[c]) {
+            next.add(`${r},${c}`);
+          }
+        }
+      }
+      return next;
+    });
+    setStagedPositions(new Set());
+  }, [game, user?.uid]);
 
   const hasRack = rack.length > 0;
   const selectedTile = selectedTileId ? rack.find((t) => t.id === selectedTileId) ?? null : null;
@@ -399,6 +471,7 @@ export default function Game({ gameId }: { gameId?: string }) {
   };
 
   const handleCommitMove = () => {
+    if (!gameId || !game || !user?.uid) return;
     const result = computeMoveScore();
     if (!result) {
       alert("Place at least one tile before committing.");
@@ -409,22 +482,38 @@ export default function Game({ gameId }: { gameId?: string }) {
       return;
     }
 
-    setScore((prev) => prev + result.score);
     setLastMoveScore(result.score);
-    setLockedPositions((prev) => {
-      const next = new Set(prev);
-      for (const pos of stagedPositions) next.add(pos);
-      return next;
-    });
-    setStagedPositions(new Set());
+    const need = Math.max(0, 7 - rack.length);
+    const drawn = bag.slice(0, need);
+    const nextBag = bag.slice(need);
+    const nextRack = [...rack, ...drawn];
+    const nextScores = {
+      ...(game.scores ?? {}),
+      [user.uid]: (game.scores?.[user.uid] ?? 0) + result.score,
+    };
+    const nextActivePlayerUid =
+      game.player2Uid && game.activePlayerUid === game.player1Uid
+        ? game.player2Uid
+        : game.player2Uid && game.activePlayerUid === game.player2Uid
+          ? game.player1Uid
+          : game.activePlayerUid;
 
-    setRack((prevRack) => {
-      const need = Math.max(0, 7 - prevRack.length);
-      if (need === 0) return prevRack;
-      const drawn = bag.slice(0, need);
-      setBag((prevBag) => prevBag.slice(need));
-      return [...prevRack, ...drawn];
+    commitMove(gameId, {
+      boardTiles: boardToMap(boardTiles),
+      bag: nextBag,
+      racks: {
+        ...(game.racks ?? {}),
+        [user.uid]: nextRack,
+      },
+      scores: nextScores,
+      activePlayerUid: nextActivePlayerUid,
+      updatedAt: Date.now(),
+    }).catch((error) => {
+      console.error("Failed to commit move:", error);
+      alert("Failed to commit move. Please try again.");
     });
+
+    setStagedPositions(new Set());
   };
 
   useEffect(() => {
@@ -482,6 +571,9 @@ export default function Game({ gameId }: { gameId?: string }) {
       window.removeEventListener("pointerup", handlePointerUp);
     };
   }, [pointerDrag]);
+
+  if (loading) return <div>Loading game...</div>;
+  if (error) return <div>{error}</div>;
 
   return (
 <main className="min-h-screen bg-neutral-50 p-4 flex items-center justify-center text-slate-800">
@@ -635,11 +727,10 @@ export default function Game({ gameId }: { gameId?: string }) {
               </button>
             )}
             <div>
-            Your Score: {score}
-            {lastMoveScore !== null && <span className="text-neutral-400"> (+{lastMoveScore})</span>}
+              Your Score: {currentScore}
+              {lastMoveScore !== null && <span className="text-neutral-400"> (+{lastMoveScore})</span>}
+            </div>
           </div>
-          </div>
-          
         </div>
       </div>
       {pointerDrag && (

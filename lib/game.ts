@@ -1,5 +1,5 @@
 // lib/game.ts
-import { ref, set, get, update, query, orderByChild, equalTo } from 'firebase/database';
+import { ref, set, get, update, query, orderByChild, equalTo, remove } from 'firebase/database';
 import { db } from './firebase';
 import { buildBag, Tile } from './tiles';
 
@@ -10,6 +10,8 @@ export interface Game {
   activePlayerUid: string;
   bag: Tile[];
   racks: Record<string, Tile[]>;
+  boardTiles: Record<string, Tile>;
+  scores: Record<string, number>;
   updatedAt: number;
 }
 
@@ -58,6 +60,10 @@ export async function createGame(creatorUid: string): Promise<string> {
     racks: {
       [creatorUid]: creatorRack,
     },
+    boardTiles: {},
+    scores: {
+      [creatorUid]: 0,
+    },
     updatedAt: Date.now(),
   };
 
@@ -102,8 +108,21 @@ export async function joinGame(gameId: string, playerUid: string): Promise<void>
       ...game.racks,
       [playerUid]: playerRack
     },
+    scores: {
+      ...(game.scores ?? {}),
+      [playerUid]: 0
+    },
     updatedAt: Date.now()
   });
+}
+
+export async function commitMove(gameId: string, updates: Partial<Game>): Promise<void> {
+  const gameRef = ref(db, `games/${gameId}`);
+  await update(gameRef, updates);
+}
+
+export async function deleteGame(gameId: string): Promise<void> {
+  await remove(ref(db, `games/${gameId}`));
 }
 
 export async function listGamesForUser(userUid: string): Promise<GameWithId[]> {

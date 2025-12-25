@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../lib/useAuth';
 import { Auth } from './Auth';
-import { createGame, listGamesForUser, GameWithId } from '../lib/game';
+import { createGame, listGamesForUser, deleteGame, GameWithId } from '../lib/game';
 import { signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 
@@ -107,10 +107,15 @@ export default function Page() {
           {!gamesLoading && !gamesError && games.length > 0 && (
             <div className="flex flex-col gap-2">
               {games.map(({ id, game }) => (
-                <button
+                <div
                   key={id}
                   onClick={() => router.push(`/${id}`)}
-                  className="w-full rounded-lg border border-neutral-200 px-3 py-2 text-left hover:bg-neutral-50"
+                  className="w-full cursor-pointer rounded-lg border border-neutral-200 px-3 py-2 text-left hover:bg-neutral-50"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") router.push(`/${id}`);
+                  }}
                 >
                   <div className="flex items-center justify-between text-sm font-medium">
                     <span>Game {id}</span>
@@ -119,7 +124,27 @@ export default function Page() {
                   <div className="text-xs text-neutral-500 mt-1">
                     Last updated: {new Date(game.updatedAt).toLocaleString()}
                   </div>
-                </button>
+                  {game.player1Uid === user.uid && (
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={async (event) => {
+                          event.stopPropagation();
+                          try {
+                            await deleteGame(id);
+                            setGames((prev) => prev.filter((g) => g.id !== id));
+                          } catch (error) {
+                            console.error('Failed to delete game:', error);
+                            alert('Failed to delete game. Please try again.');
+                          }
+                        }}
+                        className="text-xs font-medium text-red-600 hover:underline"
+                      >
+                        Delete game
+                      </button>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           )}

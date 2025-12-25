@@ -2,11 +2,11 @@
 "use client";
 
 import dynamic from 'next/dynamic';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../lib/useAuth';
 import { Auth } from './Auth';
-import { createGame } from '../lib/game';
+import { createGame, listGamesForUser, GameWithId } from '../lib/game';
 
 const Game = dynamic(() => import('./Game'), { ssr: false });
 
@@ -14,6 +14,35 @@ export default function Page() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [creatingGame, setCreatingGame] = useState(false);
+  const [gamesLoading, setGamesLoading] = useState(false);
+  const [gamesError, setGamesError] = useState<string | null>(null);
+  const [games, setGames] = useState<GameWithId[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+
+    const loadGames = async () => {
+      setGamesLoading(true);
+      setGamesError(null);
+      try {
+        const userGames = await listGamesForUser(user.uid);
+        if (!cancelled) setGames(userGames);
+      } catch (error) {
+        console.error('Failed to load games:', error);
+        if (!cancelled) setGamesError('Failed to load games.');
+      } finally {
+        if (!cancelled) setGamesLoading(false);
+      }
+    };
+
+    loadGames();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   if (loading) return <div>Loading...</div>;
 
@@ -45,6 +74,34 @@ export default function Page() {
           >
             {creatingGame ? 'Creating Game...' : 'Create New Game'}
           </button>
+        </div>
+
+        <div className="bg-white rounded-xl border border-neutral-200 p-6 shadow-sm">
+          <div className="text-sm font-semibold text-neutral-700 mb-3">Your Games</div>
+          {gamesLoading && <div className="text-sm text-neutral-600">Loading games...</div>}
+          {gamesError && <div className="text-sm text-red-600">{gamesError}</div>}
+          {!gamesLoading && !gamesError && games.length === 0 && (
+            <div className="text-sm text-neutral-600">No games yet.</div>
+          )}
+          {!gamesLoading && !gamesError && games.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {games.map(({ id, game }) => (
+                <button
+                  key={id}
+                  onClick={() => router.push(`/${id}`)}
+                  className="w-full rounded-lg border border-neutral-200 px-3 py-2 text-left hover:bg-neutral-50"
+                >
+                  <div className="flex items-center justify-between text-sm font-medium">
+                    <span>Game {id}</span>
+                    <span className="text-xs text-neutral-500">{game.status}</span>
+                  </div>
+                  <div className="text-xs text-neutral-500 mt-1">
+                    Last updated: {new Date(game.updatedAt).toLocaleString()}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="text-center text-sm text-neutral-600">

@@ -1,5 +1,5 @@
 // lib/game.ts
-import { ref, push, set, get, update } from 'firebase/database';
+import { ref, set, get, update, query, orderByChild, equalTo } from 'firebase/database';
 import { db } from './firebase';
 import { buildBag, Tile } from './tiles';
 
@@ -11,6 +11,36 @@ export interface Game {
   bag: Tile[];
   racks: Record<string, Tile[]>;
   updatedAt: number;
+}
+
+export interface GameWithId {
+  id: string;
+  game: Game;
+}
+
+const GAME_ID_LENGTH = 5;
+const GAME_ID_ALPHABET = 'abcdefghijkmnopqrstuvwxyz23456789';
+
+function randomGameId(length = GAME_ID_LENGTH): string {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  let id = '';
+
+  for (let i = 0; i < length; i += 1) {
+    id += GAME_ID_ALPHABET[bytes[i] % GAME_ID_ALPHABET.length];
+  }
+
+  return id;
+}
+
+async function generateUniqueGameId(): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidate = randomGameId();
+    const snapshot = await get(ref(db, `games/${candidate}`));
+    if (!snapshot.exists()) return candidate;
+  }
+
+  throw new Error('Failed to generate a unique game id');
 }
 
 export async function createGame(creatorUid: string): Promise<string> {
@@ -31,11 +61,11 @@ export async function createGame(creatorUid: string): Promise<string> {
     updatedAt: Date.now(),
   };
 
-  const gamesRef = ref(db, 'games');
-  const newGameRef = push(gamesRef);
-  await set(newGameRef, game);
+  const gameId = await generateUniqueGameId();
+  const gameRef = ref(db, `games/${gameId}`);
+  await set(gameRef, game);
 
-  return newGameRef.key!;
+  return gameId;
 }
 
 export async function joinGame(gameId: string, playerUid: string): Promise<void> {
@@ -74,4 +104,34 @@ export async function joinGame(gameId: string, playerUid: string): Promise<void>
     },
     updatedAt: Date.now()
   });
+}
+
+export async function listGamesForUser(userUid: string): Promise<GameWithId[]> {
+  const gamesRef = ref(db, 'games');
+  const player1Query = query(gamesRef, orderByChild('player1Uid'), equalTo(userUid));
+  const player2Query = query(gamesRef, orderByChild('player2Uid'), equalTo(userUid));
+
+  const [player1Snap, player2Snap] = await Promise.all([
+    get(player1Query),
+    get(player2Query),
+  ]);
+
+  const games = new Map<string, Game>();
+
+  const addSnapshot = (snapshot: Awaited<ReturnType<typeof get>>) => {
+    if (!snapshot.exists()) return;
+    snapshot.forEach((child) => {
+      if (child.key) {
+        games.set(child.key, child.val() as Game);
+      }
+      return false;
+    });
+  };
+
+  addSnapshot(player1Snap);
+  addSnapshot(player2Snap);
+
+  return Array.from(games.entries())
+    .map(([id, game]) => ({ id, game }))
+    .sort((a, b) => b.game.updatedAt - a.game.updatedAt);
 }

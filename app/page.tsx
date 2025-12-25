@@ -1,7 +1,6 @@
 // app/page.tsx
 "use client";
 
-import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../lib/useAuth';
@@ -9,8 +8,6 @@ import { Auth } from './Auth';
 import { createGame, listGamesForUser, GameWithId } from '../lib/game';
 import { signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase';
-
-const Game = dynamic(() => import('./Game'), { ssr: false });
 
 export default function Page() {
   const { user, loading } = useAuth();

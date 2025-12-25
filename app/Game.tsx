@@ -180,7 +180,7 @@ export default function Game({ gameId }: { gameId?: string }) {
         if (isLocked(row, col)) return current;
         const next = current.map((r) => r.slice());
         next[row][col] = null;
-        setRack((prevRack) => [...prevRack, cell]);
+        setRack((prevRack) => (prevRack.some((t) => t.id === cell.id) ? prevRack : [...prevRack, cell]));
         setStagedPositions((prev) => {
           const nextPositions = new Set(prev);
           nextPositions.delete(`${row},${col}`);
@@ -311,7 +311,7 @@ export default function Game({ gameId }: { gameId?: string }) {
         if (!tile) return current;
         if (isLocked(dragState.source.row, dragState.source.col)) return current;
         next[dragState.source.row][dragState.source.col] = null;
-        setRack((prevRack) => [...prevRack, tile]);
+        setRack((prevRack) => (prevRack.some((t) => t.id === tile.id) ? prevRack : [...prevRack, tile]));
         setStagedPositions((prev) => {
           const nextPositions = new Set(prev);
           nextPositions.delete(`${dragState.source.row},${dragState.source.col}`);

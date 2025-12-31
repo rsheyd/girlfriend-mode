@@ -9,6 +9,18 @@ export interface Game {
   player2Uid: string | null;
   activePlayerUid: string;
   invitedEmail?: string | null;
+  playerNames?: Record<string, string>;
+  lastMove?: {
+    word: string;
+    score: number;
+    byUid: string;
+    at: number;
+    prevBoardTiles: Record<string, Tile>;
+    prevBag: Tile[];
+    prevRacks: Record<string, Tile[]>;
+    prevScores: Record<string, number>;
+    prevActivePlayerUid: string;
+  } | null;
   bag: Tile[];
   racks: Record<string, Tile[]>;
   boardTiles: Record<string, Tile>;
@@ -46,11 +58,16 @@ async function generateUniqueGameId(): Promise<string> {
   throw new Error('Failed to generate a unique game id');
 }
 
-export async function createGame(creatorUid: string, invitedEmail?: string): Promise<string> {
+export async function createGame(
+  creatorUid: string,
+  invitedEmail?: string,
+  creatorName?: string
+): Promise<string> {
   const bag = buildBag();
 
   // Deal 7 tiles to creator
   const creatorRack = bag.splice(0, 7);
+  const playerNames = creatorName ? { [creatorUid]: creatorName } : {};
 
   const game: Game = {
     status: 'waiting',
@@ -58,6 +75,8 @@ export async function createGame(creatorUid: string, invitedEmail?: string): Pro
     player2Uid: null,
     activePlayerUid: creatorUid,
     invitedEmail: invitedEmail?.trim().toLowerCase() || null,
+    playerNames,
+    lastMove: null,
     bag,
     racks: {
       [creatorUid]: creatorRack,
@@ -76,7 +95,11 @@ export async function createGame(creatorUid: string, invitedEmail?: string): Pro
   return gameId;
 }
 
-export async function joinGame(gameId: string, playerUid: string): Promise<void> {
+export async function joinGame(
+  gameId: string,
+  playerUid: string,
+  playerName?: string
+): Promise<void> {
   const gameRef = ref(db, `games/${gameId}`);
   const snapshot = await get(gameRef);
 
@@ -101,6 +124,10 @@ export async function joinGame(gameId: string, playerUid: string): Promise<void>
   // Deal tiles to joining player
   const playerRack = game.bag.slice(0, 7);
   const remainingBag = game.bag.slice(7);
+  const nextPlayerNames = {
+    ...(game.playerNames ?? {}),
+    ...(playerName ? { [playerUid]: playerName } : {}),
+  };
 
   await update(gameRef, {
     player2Uid: playerUid,
@@ -114,6 +141,7 @@ export async function joinGame(gameId: string, playerUid: string): Promise<void>
       ...(game.scores ?? {}),
       [playerUid]: 0
     },
+    playerNames: nextPlayerNames,
     updatedAt: Date.now()
   });
 }

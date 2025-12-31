@@ -9,6 +9,14 @@ import { createGame, listGamesForUser, deleteGame, GameWithId } from '../lib/gam
 import { signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 
+const resolveDisplayName = (displayName?: string | null, email?: string | null) => {
+  const trimmed = displayName?.trim();
+  if (trimmed) return trimmed;
+  const prefix = email?.split('@')[0]?.trim();
+  if (prefix) return prefix;
+  return 'Player';
+};
+
 export default function Page() {
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -68,7 +76,8 @@ export default function Page() {
   const handleCreateGame = async () => {
     try {
       setCreatingGame(true);
-      const gameId = await createGame(user.uid, inviteEmail);
+      const creatorName = resolveDisplayName(user.displayName, user.email);
+      const gameId = await createGame(user.uid, inviteEmail, creatorName);
       if (inviteEmail) {
         setRecentInvites((prev) => {
           const next = [inviteEmail, ...prev.filter((email) => email !== inviteEmail)].slice(0, 5);

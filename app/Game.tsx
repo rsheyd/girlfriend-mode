@@ -72,7 +72,9 @@ function removeFromSet(prev: Set<string>, value: string): Set<string> {
 
 function appendToRack(prevRack: Tile[], tiles: Tile | Tile[]): Tile[] {
   const incoming = Array.isArray(tiles) ? tiles : [tiles];
-  return [...prevRack, ...incoming];
+  const existing = new Set(prevRack.map((tile) => tile.id));
+  const deduped = incoming.filter((tile) => !existing.has(tile.id));
+  return [...prevRack, ...deduped];
 }
 
 /*** Classic Scrabble multiplier layout (15x15). This encodes one quadrant and mirrors it for symmetry. */
@@ -170,6 +172,20 @@ function bgClass(mult: Mult): string {
   }
 }
 
+function resolveDisplayName(displayName?: string | null, email?: string | null): string {
+  const trimmed = displayName?.trim();
+  if (trimmed) return trimmed.split(/\s+/)[0] ?? trimmed;
+  const prefix = email?.split("@")[0]?.trim();
+  if (prefix) return prefix;
+  return "Player";
+}
+
+function formatTurnLabel(name: string): string {
+  if (!name) return "Turn";
+  const endsWithS = name.toLowerCase().endsWith("s");
+  return `${name}${endsWithS ? "'" : "'s"} Turn`;
+}
+
 /* =========================================================
    Page component (state + rendering)
    ========================================================= */
@@ -188,7 +204,6 @@ export default function Game({ gameId }: { gameId?: string }) {
   const [selectedTileId, setSelectedTileId] = useState<string | null>(null);
   const [lockedPositions, setLockedPositions] = useState<Set<string>>(() => new Set());
   const [stagedPositions, setStagedPositions] = useState<Set<string>>(() => new Set());
-  const [lastMoveScore, setLastMoveScore] = useState<number | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [pointerDrag, setPointerDrag] = useState<{
     tile: Tile;
@@ -202,17 +217,49 @@ export default function Game({ gameId }: { gameId?: string }) {
   const pointerDragRef = useRef<typeof pointerDrag>(null);
   const joinAttemptedRef = useRef(false);
 
-  const activePlayer = useMemo(() => {
-    if (!game) return "Player 1";
-    if (game.activePlayerUid === game.player1Uid) return "Player 1";
-    if (game.player2Uid && game.activePlayerUid === game.player2Uid) return "Player 2";
-    return "Player 1";
-  }, [game]);
+  const playerNameForUid = (uid?: string | null) => {
+    if (!uid) return "Player";
+    const fromGame = game?.playerNames?.[uid];
+    if (fromGame) return fromGame.split(/\s+/)[0] ?? fromGame;
+    if (uid === user?.uid) return resolveDisplayName(user.displayName, user.email);
+    return "Opponent";
+  };
+
+  const turnLabel = useMemo(() => {
+    if (!game) return "Turn";
+    if (user?.uid && game.activePlayerUid === user.uid) return "Your Turn";
+    const activeName = playerNameForUid(game.activePlayerUid);
+    return formatTurnLabel(activeName);
+  }, [game, user?.uid, user?.displayName, user?.email]);
+
+  const isUsersTurn = !!user?.uid && game?.activePlayerUid === user.uid;
+  const isOpponentTurn = !!user?.uid && !!game?.activePlayerUid && game.activePlayerUid !== user.uid;
+  const hasStagedTiles = stagedPositions.size > 0;
 
   const currentScore = useMemo(() => {
     if (!user?.uid || !game?.scores) return 0;
     return game.scores[user.uid] ?? 0;
   }, [game?.scores, user?.uid]);
+
+  const opponentScore = useMemo(() => {
+    if (!user?.uid || !game?.scores) return 0;
+    const opponentUid = game.player1Uid === user.uid ? game.player2Uid : game.player1Uid;
+    if (!opponentUid) return 0;
+    return game.scores[opponentUid] ?? 0;
+  }, [game?.scores, game?.player1Uid, game?.player2Uid, user?.uid]);
+
+  const opponentName = useMemo(() => {
+    if (!user?.uid || !game) return "Opponent";
+    const opponentUid = game.player1Uid === user.uid ? game.player2Uid : game.player1Uid;
+    return playerNameForUid(opponentUid);
+  }, [game, user?.uid]);
+
+  const lastMove = game?.lastMove ?? null;
+  const canUndoLastMove =
+    !!lastMove &&
+    lastMove.byUid === user?.uid &&
+    lastMove.word !== "UNDO" &&
+    !hasStagedTiles;
 
   useEffect(() => {
     if (!game) return;
@@ -248,7 +295,8 @@ export default function Game({ gameId }: { gameId?: string }) {
     if (game.invitedEmail.toLowerCase() !== user.email.toLowerCase()) return;
 
     joinAttemptedRef.current = true;
-    joinGame(gameId as string, user.uid).catch((error) => {
+    const playerName = resolveDisplayName(user.displayName, user.email);
+    joinGame(gameId as string, user.uid, playerName).catch((error) => {
       console.error("Failed to auto-join game:", error);
       joinAttemptedRef.current = false;
     });
@@ -491,22 +539,18 @@ export default function Game({ gameId }: { gameId?: string }) {
       }
     }
 
-    return { score: letterSum * wordMultiplier };
+    const word = tiles.map((tile) => tile.tile.letter).join("");
+    return { score: letterSum * wordMultiplier, word };
   };
 
   const handleCommitMove = () => {
     if (!gameId || !game || !user?.uid) return;
     const result = computeMoveScore();
-    if (!result) {
-      setMoveError("Place at least one tile before committing.");
-      return;
-    }
     if ("error" in result) {
       setMoveError(result.error);
       return;
     }
 
-    setLastMoveScore(result.score);
     setMoveError(null);
     const need = Math.max(0, 7 - rack.length);
     const drawn = bag.slice(0, need);
@@ -532,6 +576,17 @@ export default function Game({ gameId }: { gameId?: string }) {
       },
       scores: nextScores,
       activePlayerUid: nextActivePlayerUid,
+      lastMove: {
+        word: result.word,
+        score: result.score,
+        byUid: user.uid,
+        at: Date.now(),
+        prevBoardTiles: game.boardTiles ?? {},
+        prevBag: game.bag ?? [],
+        prevRacks: game.racks ?? {},
+        prevScores: game.scores ?? {},
+        prevActivePlayerUid: game.activePlayerUid,
+      },
       updatedAt: Date.now(),
     }).catch((error) => {
       console.error("Failed to commit move:", error);
@@ -562,6 +617,64 @@ export default function Game({ gameId }: { gameId?: string }) {
     });
     setStagedPositions(new Set());
     setSelectedTileId(null);
+  };
+
+  const handlePassTurn = () => {
+    if (!gameId || !game || !user?.uid) return;
+
+    const nextActivePlayerUid =
+      game.player2Uid && game.activePlayerUid === game.player1Uid
+        ? game.player2Uid
+        : game.player2Uid && game.activePlayerUid === game.player2Uid
+          ? game.player1Uid
+          : game.activePlayerUid;
+
+    commitMove(gameId, {
+      activePlayerUid: nextActivePlayerUid,
+      lastMove: {
+        word: "PASS",
+        score: 0,
+        byUid: user.uid,
+        at: Date.now(),
+        prevBoardTiles: game.boardTiles ?? {},
+        prevBag: game.bag ?? [],
+        prevRacks: game.racks ?? {},
+        prevScores: game.scores ?? {},
+        prevActivePlayerUid: game.activePlayerUid,
+      },
+      updatedAt: Date.now(),
+    }).catch((error) => {
+      console.error("Failed to pass turn:", error);
+      alert("Failed to pass turn. Please try again.");
+    });
+  };
+
+  const handleUndoMove = () => {
+    if (!gameId || !game || !user?.uid || !lastMove) return;
+    if (lastMove.byUid !== user.uid) return;
+
+    commitMove(gameId, {
+      boardTiles: lastMove.prevBoardTiles,
+      bag: lastMove.prevBag,
+      racks: lastMove.prevRacks,
+      scores: lastMove.prevScores,
+      activePlayerUid: lastMove.prevActivePlayerUid,
+      lastMove: {
+        word: "UNDO",
+        score: 0,
+        byUid: user.uid,
+        at: Date.now(),
+        prevBoardTiles: lastMove.prevBoardTiles,
+        prevBag: lastMove.prevBag,
+        prevRacks: lastMove.prevRacks,
+        prevScores: lastMove.prevScores,
+        prevActivePlayerUid: lastMove.prevActivePlayerUid,
+      },
+      updatedAt: Date.now(),
+    }).catch((error) => {
+      console.error("Failed to undo move:", error);
+      alert("Failed to undo move. Please try again.");
+    });
   };
 
   useEffect(() => {
@@ -634,7 +747,8 @@ export default function Game({ gameId }: { gameId?: string }) {
             <div className="text-xs text-neutral-500">-- a slightly unfair word game</div>
             {gameId && (
               <p className="text-sm text-neutral-600 mt-1">
-                Game ID: <code className="bg-neutral-100 px-2 py-1 rounded text-xs">{gameId}</code>
+                Game {game?.player2Uid ? `with ${opponentName}` : ""} - {" "}
+                <code className="bg-neutral-100 px-2 py-1 rounded text-xs">{gameId}</code>
               </p>
             )}
           </div>
@@ -761,32 +875,80 @@ export default function Game({ gameId }: { gameId?: string }) {
               ))}
             </div>
           )}
-          {/* Turn + Commit + Bag */}
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-sm">
+          {/* Commit + Bag */}
+          <div
+            className={[
+              "mt-2 flex flex-wrap items-center justify-between gap-3",
+              hasStagedTiles ? "text-[11px]" : "text-xs",
+            ].join(" ")}
+          >
             <div>
-              <div>Turn: {activePlayer}</div>
-              <div>Tiles in bag: {bag.length}</div>
-              {moveError && <div className="mt-1 text-xs text-red-600">{moveError}</div>}
+              <div className={isUsersTurn ? "font-semibold text-slate-900" : "text-slate-700"}>
+                Your Score: {currentScore}
+                {isUsersTurn && (
+                  <span className="mr-2 inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                    Turn
+                  </span>
+                )}
+              </div>
+              <div className={isOpponentTurn ? "font-semibold text-slate-900" : "text-slate-700"}>
+                {opponentName}'s Score: {opponentScore}
+                {isOpponentTurn && (
+                  <span className="mr-2 inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                    Turn
+                  </span>
+                )}
+              </div>
             </div>
-            {stagedPositions.size > 0 && (
+            {hasStagedTiles && (
               <div className="flex items-center gap-2">
                 <button
-                  onClick={handleResetMove}
-                  className="rounded-md border border-neutral-200 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100"
-                >
-                  Reset
-                </button>
-                <button
                   onClick={handleCommitMove}
-                  className="rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                  disabled={!isUsersTurn}
+                  className="rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Play Word
                 </button>
+                <button
+                  onClick={handleResetMove}
+                  className="rounded-md border border-neutral-200 px-2 py-1 text-xs font-semibold text-neutral-700 hover:bg-neutral-100"
+                >
+                  Reset
+                </button>
+              </div>
+            )}
+            {!hasStagedTiles && (canUndoLastMove || isUsersTurn) && (
+              <div className="flex items-center gap-2">
+                {canUndoLastMove && (
+                  <button
+                    onClick={handleUndoMove}
+                    className="rounded-md border border-neutral-200 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100"
+                  >
+                    Undo
+                  </button>
+                )}
+                {isUsersTurn && (
+                  <button
+                    onClick={handlePassTurn}
+                    className="rounded-md border border-neutral-200 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100"
+                  >
+                    Pass
+                  </button>
+                )}
               </div>
             )}
             <div>
-              Your Score: {currentScore}
-              {lastMoveScore !== null && <span className="text-neutral-400"> (+{lastMoveScore})</span>}
+              {lastMove && (
+                <div className="text-neutral-600">
+                  {lastMove.word === "PASS"
+                    ? `Last Move: ${lastMove.byUid === user?.uid ? "You" : playerNameForUid(lastMove.byUid)} passed`
+                    : lastMove.word === "UNDO"
+                      ? "Last Move: Undone"
+                      : `Last Move: ${lastMove.word} (+${lastMove.score})`}
+                </div>
+              )}
+              <div>Tiles in Bag: {bag.length}</div>
+              {moveError && <div className="mt-1 text-xs text-red-600">{moveError}</div>}
             </div>
           </div>
         </div>
